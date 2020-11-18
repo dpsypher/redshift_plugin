@@ -92,6 +92,7 @@ class S3ToRedshiftOperator(BaseOperator):
     def __init__(self,
                  s3_conn_id,
                  s3_bucket,
+                 s3_bucket_no_acesss_point,
                  s3_key,
                  redshift_conn_id,
                  redshift_schema,
@@ -111,6 +112,7 @@ class S3ToRedshiftOperator(BaseOperator):
         super().__init__(*args, **kwargs)
         self.s3_conn_id = s3_conn_id
         self.s3_bucket = s3_bucket
+        self.s3_bucket_no_acesss_point = s3_bucket_no_acesss_point
         self.s3_key = s3_key
         self.redshift_conn_id = redshift_conn_id
         self.redshift_schema = redshift_schema.lower()
@@ -125,6 +127,9 @@ class S3ToRedshiftOperator(BaseOperator):
         self.distkey = distkey
         self.sortkey = sortkey
         self.sort_type = sort_type
+
+        import boto3
+        boto3.set_stream_logger('boto3.resources', logging.DEBUG)
 
         if self.load_type.lower() not in ("append", "rebuild", "truncate", "upsert"):
             raise Exception('Please choose "append", "rebuild", or "upsert".')
@@ -315,7 +320,7 @@ class S3ToRedshiftOperator(BaseOperator):
             FROM 's3://{0}/{1}'
             CREDENTIALS '{2}'
             {3};
-            """.format(self.s3_bucket,
+            """.format(self.s3_bucket_no_acesss_point,
                        self.s3_key,
                        getS3Conn(),
                        params)
@@ -350,6 +355,16 @@ class S3ToRedshiftOperator(BaseOperator):
         for item in schema:
             k = "{quote}{key}{quote}".format(quote='"', key=item['name'])
             field = ' '.join([k, item['type']])
+            
+            if item['length']:
+                field = "{field}({length}) ".format(field=field, length=item['length'])
+            # if item['precision'] and item['precision_radix']:
+            #     field = "{field}({precision}, {precision_radix}) ".format(
+            #         field=field, 
+            #         precision=item['precision'],
+            #         precision_radix=item['precision_radix'],
+            #     )
+
             if isinstance(self.sortkey, str) and self.sortkey == item['name']:
                 field += ' sortkey'
             output += field
@@ -370,8 +385,8 @@ class S3ToRedshiftOperator(BaseOperator):
         dk = ''
         sk = ''
 
-        if self.primary_key:
-            pk = ', primary key("{0}")'.format(self.primary_key)
+        # if self.primary_key:
+        #     pk = ', primary key("{0}")'.format(self.primary_key)
 
         if self.foreign_key:
             if isinstance(self.foreign_key, list):
